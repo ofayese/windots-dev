@@ -1,0 +1,10 @@
+[core]
+    editor = nvim
+[alias]
+    co = checkout
+    hist = log --pretty=format:\"%h %ad | %s%d [%an]\" --graph --date=short
+[fetch]
+    prune = true
+[user]
+	email =  60392167+ofayese@users.noreply.github.com
+	name = Olaolu Fayese
