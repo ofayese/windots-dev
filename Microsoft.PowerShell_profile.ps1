@@ -6,6 +6,16 @@ $global:PowerShellVersion = $PSVersionTable.PSVersion.Major
 $global:IsPowerShell5    = ($global:PowerShellVersion -eq 5)
 $global:IsPowerShellCore = ($global:PowerShellVersion -ge 6)
 $debug = $false
+
+# $PSStyle is an automatic variable only in PowerShell 6+. Provide a no-op fallback on
+# Windows PowerShell 5.1 so colorized output (Show-Help, banners) degrades to plain text
+# instead of producing empty/garbled sequences.
+if (-not $PSStyle) {
+    $emptyColors = [pscustomobject]@{
+        Cyan = ''; Yellow = ''; Green = ''; Magenta = ''; Red = ''; Blue = ''; White = ''
+    }
+    $global:PSStyle = [pscustomobject]@{ Reset = ''; Foreground = $emptyColors }
+}
 # Path to file storing last update check date and interval (days)
 $timeFilePath   = [Environment]::GetFolderPath("MyDocuments") + "\PowerShell\LastExecutionTime.txt"
 $updateInterval = 7
@@ -248,7 +258,7 @@ function Test-CommandExists {
     return $null -ne (Get-Command $command -ErrorAction SilentlyContinue)
 }
 
-# Editor configuration – pick an editor in preference order
+# Editor configuration - pick an editor in preference order
 $EDITOR = if (Test-CommandExists code-insiders) { 'code-insiders' }
     elseif (Test-CommandExists pvim) { 'pvim' }
     elseif (Test-CommandExists nvim) { 'nvim' }
@@ -413,7 +423,9 @@ function trash($path) {
     .SYNOPSIS
         Moves a file or folder to the Recycle Bin (Windows).
     #>
-    $fullPath = (Resolve-Path -Path $path -ErrorAction SilentlyContinue)?.Path
+    # Null-conditional (?.) is PS7-only; use an explicit null check for 5.1 compatibility.
+    $resolved = Resolve-Path -Path $path -ErrorAction SilentlyContinue
+    $fullPath = if ($resolved) { $resolved.Path } else { $null }
     if (-not $fullPath) {
         Write-Host "Error: Item '$path' does not exist."
         return
@@ -487,7 +499,11 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
 # Custom PSReadLine key handlers
 Set-PSReadLineKeyHandler -Key UpArrow   -Function HistorySearchBackward
 Set-PSReadLineKeyHandler -Key DownArrow -Function HistorySearchForward
-Set-PSReadLineKeyHandler -Key Alt+l     -Function AcceptSuggestion
+# AcceptSuggestion requires PSReadLine 2.1+ (predictions), which ships with PS7.
+# Windows PowerShell 5.1's bundled PSReadLine lacks it, so guard this binding.
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    Set-PSReadLineKeyHandler -Key Alt+l -Function AcceptSuggestion
+}
 Set-PSReadLineKeyHandler -Key Tab       -Function MenuComplete
 Set-PSReadLineKeyHandler -Chord 'Ctrl+d'       -Function DeleteChar
 Set-PSReadLineKeyHandler -Chord 'Ctrl+w'       -Function BackwardDeleteWord
@@ -538,7 +554,11 @@ Register-ArgumentCompleter -Native -CommandName dotnet -ScriptBlock $scriptblock
 # Prompt and Theme Configuration
 if ($PSVersionTable.PSVersion.Major -ge 7) {
     # Initialize Oh-My-Posh with the chosen theme (spacebar)
-    oh-my-posh init pwsh --config "$env:POSH_THEMES_PATH\spacebar.omp.json" | Invoke-Expression
+    if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
+        oh-my-posh init pwsh --config "$env:POSH_THEMES_PATH\spacebar.omp.json" | Invoke-Expression
+    } else {
+        Write-Warning "oh-my-posh is not installed. (Run setup to install oh-my-posh.)"
+    }
 } elseif ($PSVersionTable.PSVersion.Major -eq 5) {
     Write-Warning "Oh-My-Posh is not fully compatible with PowerShell 5.1. Using classic prompt."
     function prompt { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " }
@@ -608,3 +628,7 @@ Write-Host "$($PSStyle.Foreground.Yellow)Use 'Show-Help' to display help$($PSSty
 Write-Host "$($PSStyle.Foreground.Yellow)Use 'Update-PowerShell' to check for updates$($PSStyle.Reset)"
 Write-Host "$($PSStyle.Foreground.Yellow)Use 'Update-Software' to update installed software$($PSStyle.Reset)"
 Write-Host "$($PSStyle.Foreground.Yellow)Use 'Edit-Profile' to open this profile in your editor$($PSStyle.Reset)"
+# Only (re)initialize oh-my-posh on PS7 where it is supported here; 5.1 keeps its classic prompt.
+if ($PSVersionTable.PSVersion.Major -ge 7 -and (Get-Command oh-my-posh -ErrorAction SilentlyContinue)) {
+    oh-my-posh init pwsh | Invoke-Expression
+}
