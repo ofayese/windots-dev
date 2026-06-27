@@ -44,7 +44,27 @@ $global:canConnectToGitHub = if ($global:IsPowerShellCore) {
 if (-not (Get-Module -ListAvailable -Name Terminal-Icons)) {
     Install-Module -Name Terminal-Icons -Scope CurrentUser -Force -SkipPublisherCheck
 }
-Import-Module -Name Terminal-Icons
+# Terminal-Icons caches its theme data as CLIXML under %APPDATA%\powershell\Community\Terminal-Icons.
+# These caches can get corrupted (interrupted writes, OneDrive sync conflicts), after which the module
+# emits a raw "Import-Clixml: ... start tag ... does not match the end tag" error during profile load.
+# Proactively drop any unreadable cache file so the module regenerates a clean copy on import.
+$terminalIconsCache = Join-Path $env:APPDATA 'powershell\Community\Terminal-Icons'
+if (Test-Path -LiteralPath $terminalIconsCache) {
+    Get-ChildItem -LiteralPath $terminalIconsCache -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $cacheFile = $_.FullName
+        try {
+            $null = Import-Clixml -LiteralPath $cacheFile -ErrorAction Stop
+        } catch {
+            Write-Warning "Removing corrupted Terminal-Icons cache file: $cacheFile"
+            Remove-Item -LiteralPath $cacheFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+try {
+    Import-Module -Name Terminal-Icons -ErrorAction Stop
+} catch {
+    Write-Warning "Failed to import Terminal-Icons: $_"
+}
 
 # Import Chocolatey's profile module if available (for Chocolatey enhancements)
 $ChocolateyProfile = "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
